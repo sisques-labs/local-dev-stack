@@ -44,9 +44,9 @@ Stop the stack without losing data:
 docker compose down
 ```
 
-Stop the stack **and delete all data** (Postgres, Redis, Prometheus — see
-the [Kafka persistence](#kafka-persistence) note below for why Kafka isn't
-listed):
+Stop the stack **and delete all data** (Postgres, Redis, RedisInsight,
+MongoDB, Prometheus — see the [Kafka persistence](#kafka-persistence) note
+below for why Kafka isn't listed):
 
 ```bash
 docker compose down -v
@@ -62,6 +62,9 @@ If you don't create a `.env` file, the defaults baked into
 |-------------------|------------------------------------------------|-----------------------------------------------------|
 | PostgreSQL         | `postgres:16.4-alpine`                        | Single shared instance, one database per service    |
 | Redis              | `redis:7.4.0-alpine`                          | Shared cache/session store, no auth (local only)     |
+| RedisInsight       | `redis/redisinsight:2.60`                     | Web UI to browse/inspect Redis keys                  |
+| MongoDB            | `mongo:7.0.15`                                | Shared instance, root auth (kept for future use — no service uses it yet) |
+| Mongo Express      | `mongo-express:1.0.2-20`                      | Web UI to browse/inspect MongoDB collections         |
 | Kafka              | `apache/kafka:3.8.0`                          | Single-broker cluster, KRaft mode (no Zookeeper)     |
 | Kafka UI           | `ghcr.io/kafbat/kafka-ui:v1.0.0`              | Web UI to inspect topics/messages                    |
 | Jaeger             | `jaegertracing/all-in-one:1.60`               | Trace collector + UI                                 |
@@ -79,6 +82,26 @@ startup (empty data volume), `docker/postgres/init-db.sh` creates one
 database per service from an easy-to-edit list — see
 [Adding a new service's database](#adding-a-new-services-database). Data
 persists in the named volume `local-dev-stack-postgres-data`.
+
+### Redis
+
+A single shared Redis instance, no authentication (local only). Inspect it
+via **RedisInsight** at http://localhost:5540 — it's not pre-wired to the
+Redis instance, so on first visit add a database with host `redis`, port
+`6379`. Data persists in `local-dev-stack-redis-data`.
+
+### MongoDB
+
+A single shared MongoDB instance with root authentication
+(`MONGO_ROOT_USERNAME` / `MONGO_ROOT_PASSWORD`, both default to
+`devuser` / `devpassword`). It's included for future use — no
+`nestjs-template` service uses MongoDB today. If/when a service needs it,
+either connect to this shared instance with its own database name (Mongo
+doesn't need a database created up front — it's created lazily on first
+write) or, if per-service isolation matters more, use a separate
+authentication database/user per service. Data persists in
+`local-dev-stack-mongo-data`. Browse it via **Mongo Express** at
+http://localhost:8081 (basic-auth login, default `admin` / `devpassword`).
 
 ### Kafka
 
@@ -199,6 +222,12 @@ KAFKA_BROKERS=kafka:19092
 REDIS_HOST=redis
 REDIS_PORT=6379
 
+# MongoDB — only if the service actually needs it (none does today)
+MONGO_HOST=mongo
+MONGO_PORT=27017
+MONGO_USERNAME=devuser
+MONGO_PASSWORD=devpassword
+
 # OpenTelemetry — traces/metrics go to the collector, never straight to Jaeger
 OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
 OTEL_SERVICE_NAME=<your-service-name>
@@ -216,6 +245,9 @@ hostnames — e.g. `KAFKA_BROKERS=localhost:9092`,
 |------------------|-----------|-----------------------------------------------|
 | PostgreSQL       | 5432      | Database connections                          |
 | Redis            | 6379      | Redis connections                             |
+| RedisInsight     | 5540      | Web UI for Redis                              |
+| MongoDB          | 27017     | Database connections                          |
+| Mongo Express    | 8081      | Web UI for MongoDB                            |
 | Kafka            | 9092      | Broker (`PLAINTEXT_HOST` listener)            |
 | Kafka UI         | 8080      | Web UI to browse topics/messages              |
 | Jaeger UI        | 16686     | Web UI for traces                             |

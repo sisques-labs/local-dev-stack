@@ -38,6 +38,57 @@ services:
     networks:
       - local-dev-stack-net
 
+  redisinsight:
+    image: redis/redisinsight:2.60
+    container_name: local-dev-stack-redisinsight
+    restart: unless-stopped
+    ports:
+      - "${REDISINSIGHT_PORT:-5540}:5540"
+    volumes:
+      - redisinsight_data:/data
+    depends_on:
+      - redis
+    networks:
+      - local-dev-stack-net
+
+  mongo:
+    image: mongo:7.0.15
+    container_name: local-dev-stack-mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-devuser}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-devpassword}
+    ports:
+      - "${MONGO_PORT:-27017}:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - local-dev-stack-net
+
+  mongo-express:
+    image: mongo-express:1.0.2-20
+    container_name: local-dev-stack-mongo-express
+    restart: unless-stopped
+    environment:
+      ME_CONFIG_MONGODB_SERVER: mongo
+      ME_CONFIG_MONGODB_PORT: 27017
+      ME_CONFIG_MONGODB_ADMINUSERNAME: ${MONGO_ROOT_USERNAME:-devuser}
+      ME_CONFIG_MONGODB_ADMINPASSWORD: ${MONGO_ROOT_PASSWORD:-devpassword}
+      ME_CONFIG_BASICAUTH_USERNAME: ${MONGO_EXPRESS_USERNAME:-admin}
+      ME_CONFIG_BASICAUTH_PASSWORD: ${MONGO_EXPRESS_PASSWORD:-devpassword}
+    ports:
+      - "${MONGO_EXPRESS_PORT:-8081}:8081"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    networks:
+      - local-dev-stack-net
+
   kafka:
     image: apache/kafka:3.8.0
     container_name: local-dev-stack-kafka
@@ -126,5 +177,9 @@ volumes:
     name: local-dev-stack-postgres-data
   redis_data:
     name: local-dev-stack-redis-data
+  redisinsight_data:
+    name: local-dev-stack-redisinsight-data
+  mongo_data:
+    name: local-dev-stack-mongo-data
   prometheus_data:
     name: local-dev-stack-prometheus-data
