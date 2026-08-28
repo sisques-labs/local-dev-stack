@@ -1,0 +1,130 @@
+name: local-dev-stack
+
+services:
+  postgres:
+    image: postgres:16.4-alpine
+    container_name: local-dev-stack-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-devuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpassword}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-devuser}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - local-dev-stack-net
+
+  redis:
+    image: redis:7.4.0-alpine
+    container_name: local-dev-stack-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - local-dev-stack-net
+
+  kafka:
+    image: apache/kafka:3.8.0
+    container_name: local-dev-stack-kafka
+    hostname: kafka
+    restart: unless-stopped
+    ports:
+      - "${KAFKA_PORT:-9092}:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://kafka:19092,CONTROLLER://kafka:29093,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:19092,PLAINTEXT_HOST://localhost:${KAFKA_PORT:-9092}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
+    networks:
+      - local-dev-stack-net
+
+  kafka-ui:
+    image: ghcr.io/kafbat/kafka-ui:v1.0.0
+    container_name: local-dev-stack-kafka-ui
+    restart: unless-stopped
+    ports:
+      - "${KAFKA_UI_PORT:-8080}:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:19092
+    depends_on:
+      - kafka
+    networks:
+      - local-dev-stack-net
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.60
+    container_name: local-dev-stack-jaeger
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "${JAEGER_UI_PORT:-16686}:16686"
+    networks:
+      - local-dev-stack-net
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.108.0
+    container_name: local-dev-stack-otel-collector
+    restart: unless-stopped
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./docker/otel/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "${OTEL_GRPC_PORT:-4317}:4317"
+      - "${OTEL_HTTP_PORT:-4318}:4318"
+      - "${OTEL_METRICS_PORT:-8889}:8889"
+    depends_on:
+      - jaeger
+    networks:
+      - local-dev-stack-net
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: local-dev-stack-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./docker/otel/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    depends_on:
+      - otel-collector
+    networks:
+      - local-dev-stack-net
+
+networks:
+  local-dev-stack-net:
+    name: local-dev-stack-net
+
+volumes:
+  postgres_data:
+    name: local-dev-stack-postgres-data
+  redis_data:
+    name: local-dev-stack-redis-data
+  prometheus_data:
+    name: local-dev-stack-prometheus-data
