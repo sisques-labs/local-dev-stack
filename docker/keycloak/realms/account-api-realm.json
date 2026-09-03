@@ -20,5 +20,15 @@
       "authorizationServicesEnabled": false,
       "fullScopeAllowed": true
     }
+  ],
+  "users": [
+    {
+      "username": "service-account-account-api",
+      "enabled": true,
+      "serviceAccountClientId": "account-api",
+      "clientRoles": {
+        "realm-management": ["manage-users"]
+      }
+    }
   ]
 }
