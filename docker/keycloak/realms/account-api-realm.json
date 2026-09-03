@@ -1,0 +1,24 @@
+{
+  "realm": "sisques-account",
+  "enabled": true,
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "sslRequired": "none",
+  "clients": [
+    {
+      "clientId": "account-api",
+      "name": "Sisques Account API (internal adapter)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "local-dev-secret-change-me",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": true,
+      "authorizationServicesEnabled": false,
+      "fullScopeAllowed": true
+    }
+  ]
+}

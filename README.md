@@ -22,9 +22,9 @@ points at it.
 
 - Docker and Docker Compose v2 (`docker compose`, not the legacy
   `docker-compose`).
-- Ports 5432, 6379, 8080, 9092, 9090, 16686, 4317, 4318 and 8889 free on
-  your machine (see [Ports used](#ports-used) below for how to change any of
-  them).
+- Ports 5432, 6379, 5540, 27017, 8081, 8084, 8080, 9092, 9090, 16686, 4317,
+  4318 and 8889 free on your machine (see [Ports used](#ports-used) below
+  for how to change any of them).
 
 ## Getting started
 
@@ -45,8 +45,9 @@ docker compose down
 ```
 
 Stop the stack **and delete all data** (Postgres, Redis, RedisInsight,
-MongoDB, Prometheus — see the [Kafka persistence](#kafka-persistence) note
-below for why Kafka isn't listed):
+MongoDB, Prometheus — see the [Kafka persistence](#kafka-persistence)
+note below for why Kafka isn't listed, and the [Keycloak](#keycloak) section
+for why it has no data volume to delete in the first place):
 
 ```bash
 docker compose down -v
@@ -65,6 +66,8 @@ If you don't create a `.env` file, the defaults baked into
 | RedisInsight       | `redis/redisinsight:2.60`                     | Web UI to browse/inspect Redis keys                  |
 | MongoDB            | `mongo:7.0.15`                                | Shared instance, root auth (kept for future use — no service uses it yet) |
 | Mongo Express      | `mongo-express:1.0.2-20`                      | Web UI to browse/inspect MongoDB collections         |
+| Keycloak           | `quay.io/keycloak/keycloak:26.0`              | Shared identity provider (OpenID Connect / OAuth2)   |
+| Keycloak realm import | `curlimages/curl:8.11.0`                   | One-shot job, imports `docker/keycloak/realms/*.json` |
 | Kafka              | `apache/kafka:3.8.0`                          | Single-broker cluster, KRaft mode (no Zookeeper)     |
 | Kafka UI           | `ghcr.io/kafbat/kafka-ui:v1.0.0`              | Web UI to inspect topics/messages                    |
 | Jaeger             | `jaegertracing/all-in-one:1.60`               | Trace collector + UI                                 |
@@ -102,6 +105,37 @@ write) or, if per-service isolation matters more, use a separate
 authentication database/user per service. Data persists in
 `local-dev-stack-mongo-data`. Browse it via **Mongo Express** at
 http://localhost:8081 (basic-auth login, default `admin` / `devpassword`).
+
+### Keycloak
+
+A single shared Keycloak instance, run with `start-dev` (dev mode — not
+hardened for production, fine for local use). Admin console at
+http://localhost:8084, login with `KEYCLOAK_ADMIN_USERNAME` /
+`KEYCLOAK_ADMIN_PASSWORD` (both default to `admin`).
+
+**No persistent data volume, by design** — Keycloak runs with ephemeral
+in-memory/H2 storage, so any changes made through the admin console are
+lost on `docker compose down` / container recreation (realms get
+re-imported on every `docker compose up -d` anyway — see below).
+
+**Realms are imported via the Admin REST API, not Keycloak's own
+`--import-realm` flag.** A one-shot `keycloak-realm-import` service
+(`curlimages/curl`, see `docker/keycloak/import-realms.sh`) waits for
+Keycloak to be ready, then POSTs every file in `docker/keycloak/realms/` to
+`/admin/realms`, and exits. This is deliberate, not a style preference:
+`start-dev --import-realm` reliably crashes Keycloak 26.0 on boot with
+`ERROR: Session not bound to a realm` right after logging
+`Realm '<name>' imported` — reproduced repeatedly while adding this
+service (see upstream
+[keycloak/keycloak#33637](https://github.com/keycloak/keycloak/issues/33637)
+and
+[#34673](https://github.com/keycloak/keycloak/issues/34673), both
+unresolved as of image `26.0.8`). Don't switch back to `--import-realm`
+without confirming that bug is actually fixed upstream.
+
+See [Adding a new service's realm](#adding-a-new-services-realm) for how a
+service registers its own realm/client here, mirroring how
+`docker/postgres/init-db.sh` centralizes one database per service.
 
 ### Kafka
 
@@ -181,6 +215,41 @@ array. To add a new service's database:
        -c "CREATE DATABASE billing_service_db;"
      ```
 
+## Adding a new service's realm
+
+Realm exports are dropped as individual JSON files in
+`docker/keycloak/realms/` — the `keycloak-realm-import` job (see
+[Keycloak](#keycloak)) `POST`s every file in that directory to
+`/admin/realms` once Keycloak is up. To register a new service:
+
+1. Export (or hand-write) a realm JSON containing the service's clients and
+   roles, e.g. `docker/keycloak/realms/billing-service-realm.json`. Don't
+   include a top-level `users` block that assigns `clientRoles` on a
+   service-account user (e.g. `realm-management` roles for a client with
+   `serviceAccountsEnabled: true`) — that shape crashed Keycloak 26.0 when
+   imported via the old `--import-realm` flag (reproduced while adding
+   `account-api-realm.json` here, see [Keycloak](#keycloak)); grant those
+   role mappings once after import instead, either in the admin console
+   (Users → service-account-`<clientId>` → Role mapping) or via the Admin
+   REST API.
+2. Re-run the import job:
+
+   ```bash
+   docker compose up -d keycloak-realm-import
+   ```
+
+   The import only **creates** realms — it doesn't update ones that already
+   exist (`POST /admin/realms` returns `409 Conflict`, which the script
+   treats as "nothing to do", not an error). So this picks up a **new**
+   realm file immediately, but editing an **existing** realm file and
+   re-running the job does nothing. To apply an edit to an existing realm,
+   either make the change by hand in the admin console, or delete the realm
+   first (admin console, or `docker compose down -v && docker compose up -d`
+   to wipe every service's data and start clean) before re-running the job.
+
+Keep secrets in these files at local-dev-only placeholder values (same rule
+as everything else in this repo — see [Credentials](#credentials)).
+
 ## Pointing a nestjs-template service at this stack
 
 Your service needs to be on the same Docker network
@@ -228,6 +297,11 @@ MONGO_PORT=27017
 MONGO_USERNAME=devuser
 MONGO_PASSWORD=devpassword
 
+# Keycloak — issuer URL uses the internal hostname; admin API only if needed
+KEYCLOAK_ISSUER_URL=http://keycloak:8080/realms/<your-realm>
+KEYCLOAK_CLIENT_ID=<your-client-id>
+KEYCLOAK_CLIENT_SECRET=<your-client-secret>
+
 # OpenTelemetry — traces/metrics go to the collector, never straight to Jaeger
 OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
 OTEL_SERVICE_NAME=<your-service-name>
@@ -248,6 +322,7 @@ hostnames — e.g. `KAFKA_BROKERS=localhost:9092`,
 | RedisInsight     | 5540      | Web UI for Redis                              |
 | MongoDB          | 27017     | Database connections                          |
 | Mongo Express    | 8081      | Web UI for MongoDB                            |
+| Keycloak         | 8084      | Admin console + OpenID Connect / OAuth2 API   |
 | Kafka            | 9092      | Broker (`PLAINTEXT_HOST` listener)            |
 | Kafka UI         | 8080      | Web UI to browse topics/messages              |
 | Jaeger UI        | 16686     | Web UI for traces                             |

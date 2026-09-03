@@ -89,6 +89,39 @@ services:
     networks:
       - local-dev-stack-net
 
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: local-dev-stack-keycloak
+    restart: unless-stopped
+    command: ["start-dev"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+    ports:
+      - "${KEYCLOAK_PORT:-8084}:8080"
+    networks:
+      - local-dev-stack-net
+
+  # One-shot job: imports docker/keycloak/realms/*.json via the Admin REST
+  # API once Keycloak is up, then exits. Not run as Keycloak's own
+  # `--import-realm` startup flag — see docker/keycloak/import-realms.sh for
+  # why (a reproducible Keycloak 26.0 startup crash). No `restart:` — it's
+  # meant to run once per `docker compose up`, not loop.
+  keycloak-realm-import:
+    image: curlimages/curl:8.11.0
+    container_name: local-dev-stack-keycloak-realm-import
+    entrypoint: ["/bin/sh", "/import-realms.sh"]
+    environment:
+      KEYCLOAK_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+    volumes:
+      - ./docker/keycloak/realms:/realms:ro
+      - ./docker/keycloak/import-realms.sh:/import-realms.sh:ro
+    depends_on:
+      - keycloak
+    networks:
+      - local-dev-stack-net
+
   kafka:
     image: apache/kafka:3.8.0
     container_name: local-dev-stack-kafka
