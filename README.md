@@ -5,8 +5,8 @@ NestJS services cloned from
 [`sisques-labs/nestjs-template`](https://github.com/sisques-labs/nestjs-template).
 
 This repository contains **no application code** — only development
-infrastructure: PostgreSQL, Kafka, Redis, and an OpenTelemetry observability
-stack (OTel Collector + Jaeger + Prometheus). Services generated from
+infrastructure: PostgreSQL, Kafka, Redis, EventStoreDB, and an OpenTelemetry
+observability stack (OTel Collector + Jaeger + Prometheus). Services generated from
 `nestjs-template` do **not** run their own copies of this infrastructure;
 instead, each one connects to this shared stack via environment variables.
 
@@ -22,9 +22,9 @@ points at it.
 
 - Docker and Docker Compose v2 (`docker compose`, not the legacy
   `docker-compose`).
-- Ports 5432, 6379, 5540, 27017, 8081, 8084, 8080, 9092, 9090, 16686, 4317,
-  4318 and 8889 free on your machine (see [Ports used](#ports-used) below
-  for how to change any of them).
+- Ports 5432, 6379, 5540, 27017, 8081, 8084, 2113, 8080, 9092, 9090, 16686,
+  4317, 4318 and 8889 free on your machine (see [Ports used](#ports-used)
+  below for how to change any of them).
 
 ## Getting started
 
@@ -45,9 +45,10 @@ docker compose down
 ```
 
 Stop the stack **and delete all data** (Postgres, Redis, RedisInsight,
-MongoDB, Prometheus — see the [Kafka persistence](#kafka-persistence)
-note below for why Kafka isn't listed, and the [Keycloak](#keycloak) section
-for why it has no data volume to delete in the first place):
+MongoDB, EventStoreDB, Prometheus — see the
+[Kafka persistence](#kafka-persistence) note below for why Kafka isn't
+listed, and the [Keycloak](#keycloak) section for why it has no data volume
+to delete in the first place):
 
 ```bash
 docker compose down -v
@@ -66,6 +67,7 @@ If you don't create a `.env` file, the defaults baked into
 | RedisInsight       | `redis/redisinsight:2.60`                     | Web UI to browse/inspect Redis keys                  |
 | MongoDB            | `mongo:7.0.15`                                | Shared instance, root auth (kept for future use — no service uses it yet) |
 | Mongo Express      | `mongo-express:1.0.2-20`                      | Web UI to browse/inspect MongoDB collections         |
+| EventStoreDB       | `eventstore/eventstore:23.10.2-bookworm-slim` | Event store for domain events, single-node, insecure mode |
 | Keycloak           | `quay.io/keycloak/keycloak:26.0`              | Shared identity provider (OpenID Connect / OAuth2)   |
 | Keycloak realm import | `curlimages/curl:8.11.0`                   | One-shot job, imports `docker/keycloak/realms/*.json` |
 | Kafka              | `apache/kafka:3.8.0`                          | Single-broker cluster, KRaft mode (no Zookeeper)     |
@@ -105,6 +107,23 @@ write) or, if per-service isolation matters more, use a separate
 authentication database/user per service. Data persists in
 `local-dev-stack-mongo-data`. Browse it via **Mongo Express** at
 http://localhost:8081 (basic-auth login, default `admin` / `devpassword`).
+
+### EventStoreDB
+
+A single-node EventStoreDB instance for services following event-sourcing /
+event-store patterns. Runs in **insecure mode** (`EVENTSTORE_INSECURE=true`,
+plain HTTP/gRPC, no TLS, no auth) — fine for local dev, never use this
+configuration outside this stack. Standard projections are enabled
+(`EVENTSTORE_RUN_PROJECTIONS=All` / `EVENTSTORE_START_STANDARD_PROJECTIONS=true`).
+
+Admin UI at http://localhost:2113. Services connect via the gRPC client on
+the same port (`esdb://eventstoredb:2113?tls=false`). Data persists in
+`local-dev-stack-eventstoredb-data`; logs in
+`local-dev-stack-eventstoredb-logs`.
+
+The `eventstore/eventstore` image is used instead of the Alpine variant —
+EventStoreDB's own docs warn the Alpine build has had stability issues, so
+this repo pins the `-bookworm-slim` (Debian-based) tag.
 
 ### Keycloak
 
@@ -287,6 +306,9 @@ DATABASE_NAME=nestjs_template_db
 # Kafka — internal listener, not the host-published port
 KAFKA_BROKERS=kafka:19092
 
+# EventStoreDB — internal hostname, insecure mode (no TLS)
+EVENTSTOREDB_CONNECTION_STRING=esdb://eventstoredb:2113?tls=false
+
 # Redis
 REDIS_HOST=redis
 REDIS_PORT=6379
@@ -311,6 +333,7 @@ If you're running the service directly on the host instead of in Docker
 (e.g. `npm run start:dev` outside a container), use `localhost` and the
 host-published ports from the table below instead of the internal network
 hostnames — e.g. `KAFKA_BROKERS=localhost:9092`,
+`EVENTSTOREDB_CONNECTION_STRING=esdb://localhost:2113?tls=false`,
 `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317`.
 
 ## Ports used
@@ -323,6 +346,7 @@ hostnames — e.g. `KAFKA_BROKERS=localhost:9092`,
 | MongoDB          | 27017     | Database connections                          |
 | Mongo Express    | 8081      | Web UI for MongoDB                            |
 | Keycloak         | 8084      | Admin console + OpenID Connect / OAuth2 API   |
+| EventStoreDB     | 2113      | Admin UI + gRPC/HTTP client connections       |
 | Kafka            | 9092      | Broker (`PLAINTEXT_HOST` listener)            |
 | Kafka UI         | 8080      | Web UI to browse topics/messages              |
 | Jaeger UI        | 16686     | Web UI for traces                             |

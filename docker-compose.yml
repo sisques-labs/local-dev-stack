@@ -122,6 +122,31 @@ services:
     networks:
       - local-dev-stack-net
 
+  eventstoredb:
+    image: eventstore/eventstore:23.10.2-bookworm-slim
+    container_name: local-dev-stack-eventstoredb
+    restart: unless-stopped
+    environment:
+      EVENTSTORE_CLUSTER_SIZE: 1
+      EVENTSTORE_RUN_PROJECTIONS: All
+      EVENTSTORE_START_STANDARD_PROJECTIONS: "true"
+      EVENTSTORE_INSECURE: "true"
+      EVENTSTORE_ENABLE_ATOM_PUB_OVER_HTTP: "true"
+      EVENTSTORE_HTTP_PORT: 2113
+      EVENTSTORE_NODE_PORT: 2113
+    ports:
+      - "${EVENTSTOREDB_PORT:-2113}:2113"
+    volumes:
+      - eventstoredb_data:/var/lib/eventstore
+      - eventstoredb_logs:/var/log/eventstore
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:2113/health/live || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - local-dev-stack-net
+
   kafka:
     image: apache/kafka:3.8.0
     container_name: local-dev-stack-kafka
@@ -214,5 +239,9 @@ volumes:
     name: local-dev-stack-redisinsight-data
   mongo_data:
     name: local-dev-stack-mongo-data
+  eventstoredb_data:
+    name: local-dev-stack-eventstoredb-data
+  eventstoredb_logs:
+    name: local-dev-stack-eventstoredb-logs
   prometheus_data:
     name: local-dev-stack-prometheus-data
